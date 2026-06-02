@@ -3,29 +3,29 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>One-Motor Metronome + Pendulum — self-contained</title>
+<title>One-Motor Metronome + Pendulum — wireframe</title>
 <style>
-  html,body{margin:0;height:100%;overflow:hidden;background:#0a0c10;color:#cdd6e4;
+  html,body{margin:0;height:100%;overflow:hidden;background:#ffffff;color:#33373d;
     font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
   canvas{display:block;position:fixed;inset:0;cursor:grab;}
   canvas.drag{cursor:grabbing;}
-  .panel{position:fixed;border-radius:12px;background:rgba(14,18,26,0.82);
-    border:1px solid rgba(120,140,170,0.25);backdrop-filter:blur(6px);font-size:12px;line-height:1.5;}
+  .panel{position:fixed;border-radius:10px;background:rgba(252,252,253,0.92);
+    border:1px solid rgba(0,0,0,0.12);box-shadow:0 2px 14px rgba(0,0,0,0.07);font-size:12px;line-height:1.5;}
   #hud{top:14px;left:14px;max-width:360px;padding:14px 16px;pointer-events:none;}
-  #hud h1{font-size:13px;margin:0 0 8px;color:#eaf0fb;}
-  .k{color:#7f93b3;} .row{display:flex;justify-content:space-between;gap:12px;}
-  #status.safe{color:#57d98a;font-weight:700;} #status.crash{color:#ff5d62;font-weight:700;}
-  b.m{color:#ff8a8d;} b.p{color:#82caff;} b.y{color:#e6c463;}
-  .sep{height:1px;background:rgba(120,140,170,0.2);margin:9px 0;}
-  .hint{margin-top:8px;color:#93a1bd;font-style:italic;}
-  #ctl{top:14px;right:14px;width:230px;padding:12px 14px;}
-  #ctl label{display:block;margin:8px 0 2px;color:#aebbd2;}
+  #hud h1{font-size:13px;margin:0 0 8px;color:#1c1f24;font-weight:600;}
+  .k{color:#7a7f87;} .row{display:flex;justify-content:space-between;gap:12px;}
+  #status.safe{color:#1f9d57;font-weight:700;} #status.crash{color:#d23b40;font-weight:700;}
+  b.m{color:#cc4146;} b.p{color:#2470c8;} b.y{color:#b8860b;} b.o{color:#d2691e;}
+  .sep{height:1px;background:rgba(0,0,0,0.1);margin:9px 0;}
+  .hint{margin-top:8px;color:#8a8f97;font-style:italic;}
+  #ctl{top:14px;right:14px;width:228px;padding:12px 14px;}
+  #ctl label{display:block;margin:8px 0 2px;color:#5a5f67;}
   #ctl input[type=range]{width:100%;}
   #ctl .btns{display:flex;gap:6px;margin-top:10px;}
-  #ctl button{flex:1;background:#1d2532;color:#cdd6e4;border:1px solid #33405a;
+  #ctl button{flex:1;background:#f0f1f3;color:#33373d;border:1px solid #cfd3d9;
     border-radius:7px;padding:6px;font-family:inherit;font-size:11px;cursor:pointer;}
-  #ctl button:hover{background:#26314a;}
-  .val{float:right;color:#e6c463;}
+  #ctl button:hover{background:#e4e6ea;}
+  .val{float:right;color:#b8860b;}
 </style>
 </head>
 <body>
@@ -33,10 +33,10 @@
 
 <div id="hud" class="panel">
   <h1>One motor → two crossing motions, no tangle</h1>
-  <div>A single <b class="y">vertical line-shaft</b> spins forever. Two <b>bevel takeoffs</b>
-  drive a low <b class="m">crank</b> and a high <b class="p">crank</b>, keyed <b>90° apart</b>.
-  Each crank turns a <b>rigid connecting rod</b> on a <b>free-spinning big-end bearing</b> (gold rings)
-  — only the crank makes a full turn, so nothing winds up.</div>
+  <div>A single <b class="y">vertical line-shaft</b> spins forever (<b class="o">orange marker</b> shows the turn).
+  Two <b>bevel gears</b> take power round the corner to a low <b class="m">crank wheel</b> and a high
+  <b class="p">crank wheel</b>, keyed <b>90° apart</b>. Each crank turns a <b>rigid rod</b> on a
+  <b>free-spinning bearing</b> (gold) — only the crank fully rotates, so nothing winds up.</div>
   <div class="sep"></div>
   <div class="row"><span class="k"><b class="m">Metronome</b> (left↔right)</span><span id="angM">0°</span></div>
   <div class="row"><span class="k"><b class="p">Pendulum</b> (fwd↔back)</span><span id="angP">0°</span></div>
@@ -57,204 +57,360 @@
     <button id="resetmin">Reset min</button>
     <button id="resetcam">Camera</button>
   </div>
+  <div class="btns">
+    <button id="labels">Labels: on</button>
+    <button id="graph">Graph: on</button>
+  </div>
 </div>
 
 <script>
 "use strict";
-// ===========================================================================
-// Four-bar crank-rocker kinematics (identical maths, verified: rod length is
-// constant => the linkage physically cannot wind up / tangle).
-//   O4 = device pivot (origin), O2 = crank centre at (g,0). r2 crank, r3 rod, r4 rocker.
-// ===========================================================================
-const FB = { g: 1.7, r2: 0.45, r3: 1.6, r4: 0.6 };
-function solveFourBar(theta) {
-  const px = FB.g + FB.r2 * Math.cos(theta);
-  const py = FB.r2 * Math.sin(theta);
-  const d = Math.hypot(px, py);
-  const a = (d * d + FB.r4 * FB.r4 - FB.r3 * FB.r3) / (2 * d);
-  const h = Math.sqrt(Math.max(0, FB.r4 * FB.r4 - a * a));
-  const mx = a * px / d, my = a * py / d;
-  const qx = mx - (py / d) * h, qy = my + (px / d) * h;
-  return { px, py, qx, qy, phi: Math.atan2(qy, qx) };
+const TAU=Math.PI*2;
+const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]], add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]];
+const scl=(a,s)=>[a[0]*s,a[1]*s,a[2]*s], dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const len=a=>Math.hypot(a[0],a[1],a[2]), norm=a=>{const l=len(a)||1;return[a[0]/l,a[1]/l,a[2]/l];};
+function perpBasis(d){const up=Math.abs(d[1])<0.9?[0,1,0]:[1,0,0];const u=norm(cross(d,up));return[u,cross(d,u)];}
+
+// === four-bar crank-rocker (rod length constant -> cannot tangle) ===========
+const FB={g:1.7,r2:0.45,r3:1.6,r4:0.6};
+function solveFourBar(t){
+  const px=FB.g+FB.r2*Math.cos(t),py=FB.r2*Math.sin(t),d=Math.hypot(px,py);
+  const a=(d*d+FB.r4*FB.r4-FB.r3*FB.r3)/(2*d),h=Math.sqrt(Math.max(0,FB.r4*FB.r4-a*a));
+  const qx=a*px/d-(py/d)*h, qy=a*py/d+(px/d)*h;
+  return{px,py,qx,qy,phi:Math.atan2(qy,qx)};
 }
-let phiMin = Infinity, phiMax = -Infinity;
-for (let i = 0; i < 720; i++) { const v = solveFourBar(i * Math.PI / 360).phi; phiMin = Math.min(phiMin, v); phiMax = Math.max(phiMax, v); }
-const PHI_MEAN = (phiMin + phiMax) / 2;
+let phiMin=Infinity,phiMax=-Infinity;
+for(let i=0;i<720;i++){const v=solveFourBar(i*Math.PI/360).phi;phiMin=Math.min(phiMin,v);phiMax=Math.max(phiMax,v);}
+const PHI_MEAN=(phiMin+phiMax)/2;
+const AMP_DEG=(phiMax-phiMin)/2*180/Math.PI;
 
-// ===========================================================================
-// Scene constants (world units ~ metres, Y up)
-// ===========================================================================
-const FLOOR_Y = 0, CEILING_Y = 8, CROSS_Y = 4.2;
-const M_PIVOT_Y = 0.55, M_ARM = CROSS_Y - M_PIVOT_Y;
-const P_PIVOT_Y = CEILING_Y, P_ARM = CEILING_Y - CROSS_Y;
-const BOB_R = 0.34, POLE_X = 1.7, POLE_Z = 1.7;
-const metO2 = [FB.g, M_PIVOT_Y, 0], penO2 = [0, P_PIVOT_Y, FB.g];
-const metBevel = [POLE_X, M_PIVOT_Y, POLE_Z], penBevel = [POLE_X, P_PIVOT_Y, POLE_Z];
+// === world layout (metres, Y up) ===========================================
+const CROSS_Y=4.2, M_PIVOT_Y=0.55, M_ARM=CROSS_Y-M_PIVOT_Y, P_PIVOT_Y=8, P_ARM=8-CROSS_Y;
+const BOB_R=0.34, POLE_X=1.7, POLE_Z=1.7;
+// depth layers so links never share a plane (they pass, not intersect):
+const L_WHEEL=0.42, L_ROD=0.20, L_BELL=0.0;
+const X_AXIS=[1,0,0], Y_AXIS=[0,1,0], Z_AXIS=[0,0,1];
+// device coordinate maps: local four-bar (lx,ly) at depth-layer t -> world
+const Wmet=(lx,ly,t)=>[lx, M_PIVOT_Y+ly, t];          // metronome plane ~ z=0, crank axis +Z
+const Wpen=(lx,ly,t)=>[t, P_PIVOT_Y+ly, lx];          // pendulum plane ~ x=0, crank axis +X
 
-// ===========================================================================
-// Hand-rolled orthographic 3D projection with mouse orbit
-// ===========================================================================
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
-let W, H;
-function resize() { W = canvas.width = innerWidth; H = canvas.height = innerHeight; }
-addEventListener('resize', resize); resize();
-
-const cam = { yaw: 0.7, pitch: 0.32, scale: 56 };
-const CENTER = [0.6, 4.0, 0.6];
-function project(p) {
-  const dx = p[0] - CENTER[0], dy = p[1] - CENTER[1], dz = p[2] - CENTER[2];
-  const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw);
-  const x1 = dx * cy + dz * sy, z1 = -dx * sy + dz * cy, y1 = dy;
-  const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
-  const y2 = y1 * cp - z1 * sp, z2 = y1 * sp + z1 * cp;
-  return { x: W / 2 + x1 * cam.scale, y: H / 2 - y2 * cam.scale, depth: z2 };
+// === camera / orthographic projection ======================================
+const canvas=document.getElementById('c'), ctx=canvas.getContext('2d');
+let W,H; function resize(){W=canvas.width=innerWidth;H=canvas.height=innerHeight;} addEventListener('resize',resize); resize();
+const cam={yaw:0.72,pitch:0.34,scale:56}; const CENTER=[0.7,4.0,0.7];
+let view={yaw:0.72,pitch:0.34,scale:56,cx:0,cy:0,c3:CENTER};   // active viewport (main or closeup)
+let mx=0,my=0,hovered=null; let KM={};
+const CAM_DIST=22;   // perspective viewing distance (smaller = stronger perspective)
+function project(p){
+  const dx=p[0]-view.c3[0],dy=p[1]-view.c3[1],dz=p[2]-view.c3[2];
+  const cy=Math.cos(view.yaw),sy=Math.sin(view.yaw);
+  const x1=dx*cy+dz*sy, z1=-dx*sy+dz*cy, y1=dy;
+  const cp=Math.cos(view.pitch),sp=Math.sin(view.pitch);
+  const y2=y1*cp-z1*sp, z2=y1*sp+z1*cp;
+  const f=CAM_DIST/Math.max(3,CAM_DIST-z2);   // perspective divide (depth 0 == ortho scale)
+  return{x:view.cx+x1*view.scale*f, y:view.cy-y2*view.scale*f, depth:z2};
 }
+const depthAlpha=d=>Math.max(0.22,Math.min(1,0.62+d*0.05));
 
-// painter's-algorithm draw queue
-let queue = [];
-function pushBar(a, b, width, color) {
-  const pa = project(a), pb = project(b);
-  queue.push({ depth: (pa.depth + pb.depth) / 2, fn: () => {
-    ctx.strokeStyle = color; ctx.lineWidth = Math.max(1, width * cam.scale);
-    ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
+// === wireframe draw queue (painter-sorted polylines) =======================
+let queue=[];
+function poly(pts3,col,width,closed){
+  const ps=pts3.map(project); let d=0; for(const p of ps)d+=p.depth; d/=ps.length;
+  queue.push({depth:d, fn:()=>{
+    ctx.strokeStyle=`rgba(${col[0]},${col[1]},${col[2]},${depthAlpha(d).toFixed(3)})`;
+    ctx.lineWidth=width; ctx.lineJoin='round'; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(ps[0].x,ps[0].y);
+    for(let i=1;i<ps.length;i++)ctx.lineTo(ps[i].x,ps[i].y);
+    if(closed)ctx.closePath(); ctx.stroke();
   }});
 }
-function pushBob(c, r, color) {
-  const p = project(c), rr = r * cam.scale;
-  queue.push({ depth: p.depth, fn: () => {
-    const g = ctx.createRadialGradient(p.x - rr * 0.35, p.y - rr * 0.35, rr * 0.1, p.x, p.y, rr);
-    g.addColorStop(0, '#ffffff'); g.addColorStop(0.25, color); g.addColorStop(1, '#000');
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, 7); ctx.fill();
-  }});
+function circle3(c,axis,r,N=26){const[u,v]=perpBasis(norm(axis));const a=[];
+  for(let i=0;i<N;i++){const t=i/N*TAU;a.push(add(c,add(scl(u,Math.cos(t)*r),scl(v,Math.sin(t)*r))));}return a;}
+function circle3b(c,u,v,r,N=26){const a=[];for(let i=0;i<N;i++){const t=i/N*TAU;a.push(add(c,add(scl(u,Math.cos(t)*r),scl(v,Math.sin(t)*r))));}return a;}
+const uvFromAxis=ax=>perpBasis(norm(ax));
+// in-plane bases that MATCH the four-bar pin mapping, so wheels/gears spin the same
+// way the crank pin actually orbits (cos->first axis, sin->second axis):
+const UV_MET=[[1,0,0],[0,1,0]];   // metronome: Wmet(px,py)->(x=px, y=py)
+const UV_PEN=[[0,0,1],[0,1,0]];   // pendulum:  Wpen(px,py)->(z=px, y=py)
+
+const C={line:[64,70,78],steel:[96,104,114],dim:[150,156,166],orange:[225,120,25],
+  gold:[176,138,42],red:[205,58,64],blue:[34,106,198],rod:[44,48,56]};
+
+// solid-feeling wire tube: two end rings + longitudinal seams + a rotating marker seam
+function tube(p0,p1,r,col,width,opt={}){
+  const d=norm(sub(p1,p0)),[u,v]=perpBasis(d),N=opt.n||18;
+  poly(circle3(p0,d,r,N),col,width,true);
+  poly(circle3(p1,d,r,N),col,width,true);
+  const seams=opt.seams||4;
+  for(let i=0;i<seams;i++){const a=i/seams*TAU,dir=add(scl(u,Math.cos(a)),scl(v,Math.sin(a)));
+    poly([add(p0,scl(dir,r)),add(p1,scl(dir,r))],col,width*0.85,false);}
+  for(let k=1;k<(opt.rings||0);k++){const c=add(p0,scl(sub(p1,p0),k/opt.rings));poly(circle3(c,d,r,N),col,width*0.6,true);}
+  if(opt.marker!==undefined){const mu=opt.uvm?opt.uvm[0]:u, mv=opt.uvm?opt.uvm[1]:v;
+    const dir=add(scl(mu,Math.cos(opt.marker)),scl(mv,Math.sin(opt.marker)));
+    poly([add(p0,scl(dir,r)),add(p1,scl(dir,r))],C.orange,width*1.7,false);}
 }
-function pushDisc(c, r, color) {
-  const p = project(c), rr = r * cam.scale;
-  queue.push({ depth: p.depth - 0.01, fn: () => {
-    ctx.fillStyle = color; ctx.strokeStyle = '#1b212b'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, 7); ctx.fill(); ctx.stroke();
-  }});
+function wheelW(center,uv,r,col,spin){              // crank wheel; orange spoke points along the crank throw
+  const [u,v]=uv;
+  poly(circle3b(center,u,v,r,28),col,1.7,true);
+  poly(circle3b(center,u,v,r*0.2,12),col,1.4,true);
+  for(let i=0;i<6;i++){const a=i/6*TAU+spin,dir=add(scl(u,Math.cos(a)),scl(v,Math.sin(a)));
+    poly([add(center,scl(dir,r*0.2)),add(center,scl(dir,r))], i===0?C.orange:col, i===0?2.4:1.1, false);}
 }
-function pushRing(c, color) {           // a bearing: free-spinning, nothing tied
-  const p = project(c), rr = 0.15 * cam.scale;
-  queue.push({ depth: p.depth + 0.02, fn: () => {
-    ctx.strokeStyle = color; ctx.lineWidth = 3.5; ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, 7); ctx.stroke();
-    ctx.fillStyle = '#11151c'; ctx.beginPath(); ctx.arc(p.x, p.y, rr * 0.45, 0, 7); ctx.fill();
-  }});
+function gearW(center,uv,r,col,spin){               // bevel gear: pitch circle + teeth + hub
+  const [u,v]=uv;
+  poly(circle3b(center,u,v,r,30),col,1.4,true);
+  for(let i=0;i<16;i++){const a=i/16*TAU+spin,dir=add(scl(u,Math.cos(a)),scl(v,Math.sin(a)));
+    poly([add(center,scl(dir,r)),add(center,scl(dir,r*1.13))],col,1.1,false);}
+  poly(circle3b(center,u,v,r*0.16,10),col,1.1,true);
 }
-function drawGrid() {
-  ctx.strokeStyle = 'rgba(70,90,120,0.28)'; ctx.lineWidth = 1;
-  const G = 7;
-  for (let i = -G; i <= G; i++) {
-    let a = project([i, 0, -G]), b = project([i, 0, G]);
-    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-    a = project([-G, 0, i]); b = project([G, 0, i]);
-    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+function ringW(center,axis,r,col){poly(circle3(center,axis,r,20),col,2.4,true);poly(circle3(center,axis,r*0.5,12),col,1.3,true);}
+function dot3(p,r,col){const q=project(p),rr=Math.max(2,r*view.scale);
+  queue.push({depth:q.depth+0.05, fn:()=>{ctx.fillStyle=`rgb(${col[0]},${col[1]},${col[2]})`;ctx.beginPath();ctx.arc(q.x,q.y,rr,0,TAU);ctx.fill();}});}
+function link(a,b,col,width){poly([a,b],col,width,false);}
+function sphereW(center,r,col,solid){               // wire bob; fills solid on crash
+  const p=project(center),rr=r*cam.scale, cs=`rgb(${col[0]},${col[1]},${col[2]})`;
+  if(solid){
+    queue.push({depth:p.depth+0.3, fn:()=>{ctx.fillStyle=cs;ctx.strokeStyle='#1a1c20';ctx.lineWidth=2;
+      ctx.beginPath();ctx.arc(p.x,p.y,rr,0,TAU);ctx.fill();ctx.stroke();}});
+    return;
   }
+  queue.push({depth:p.depth+0.2, fn:()=>{ctx.strokeStyle=cs;ctx.lineWidth=2.2;
+    ctx.beginPath();ctx.arc(p.x,p.y,rr,0,TAU);ctx.stroke();}});
+  poly(circle3(center,X_AXIS,r,22),col,1,true);
+  poly(circle3(center,Y_AXIS,r,22),col,1,true);
+  poly(circle3(center,Z_AXIS,r,22),col,1,true);
+}
+function grid(){ctx.strokeStyle='rgba(120,130,140,0.22)';ctx.lineWidth=1;const G=7;
+  for(let i=-G;i<=G;i++){let a=project([i,0,-G]),b=project([i,0,G]);ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+    a=project([-G,0,i]);b=project([G,0,i]);ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();}}
+function rotZ(p,ang,o){const x=p[0]-o[0],y=p[1]-o[1];return[o[0]+x*Math.cos(ang)-y*Math.sin(ang),o[1]+x*Math.sin(ang)+y*Math.cos(ang),p[2]];}
+function rotX(p,ang,o){const y=p[1]-o[1],z=p[2]-o[2];return[p[0],o[1]+y*Math.cos(ang)-z*Math.sin(ang),o[2]+y*Math.sin(ang)+z*Math.cos(ang)];}
+const mid=(a,b)=>[(a[0]+b[0])/2,(a[1]+b[1])/2,(a[2]+b[2])/2];
+
+// --- part labels (leader line + text) ---
+let labels=[];
+function rr(x,y,w,h,r){ctx.beginPath();
+  if(ctx.roundRect){ctx.roundRect(x,y,w,h,r);}
+  else{ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}}
+function drawLabels(){
+  ctx.font='bold 11px ui-monospace,Menlo,monospace'; ctx.textBaseline='middle';
+  for(const L of labels){
+    const cp=project(L.a), tx=cp.x+L.o[0], ty=cp.y+L.o[1];   // chip pinned to a fixed rest point
+    const tp=project(L.tip||L.a);                            // leader reaches the live (moving) part
+    const w=ctx.measureText(L.code).width, bw=w+9, bh=16, bx=tx-bw/2, by=ty-bh/2;
+    const hit = mx>=bx-2&&mx<=bx+bw+2&&my>=by-2&&my<=by+bh+2;
+    if(hit) hovered=L;
+    ctx.strokeStyle='rgba(40,44,52,0.4)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(tx,ty); ctx.lineTo(tp.x,tp.y); ctx.stroke();
+    ctx.fillStyle=L.c; ctx.beginPath(); ctx.arc(tp.x,tp.y,2.6,0,TAU); ctx.fill();
+    ctx.fillStyle = hit?'#fff4dd':'rgba(255,255,255,0.92)'; rr(bx,by,bw,bh,4); ctx.fill();
+    ctx.strokeStyle = hit?L.c:'rgba(0,0,0,0.2)'; ctx.lineWidth=hit?1.6:1; ctx.stroke();
+    ctx.fillStyle='#23262c'; ctx.textAlign='center'; ctx.fillText(L.code,tx,ty+0.5);
+  }
+  ctx.textAlign='left';
 }
 
-// rotate a local point about Z (metronome swing) / about X (pendulum swing)
-function rotZ(p, ang, o) { const x = p[0] - o[0], y = p[1] - o[1];
-  return [o[0] + x * Math.cos(ang) - y * Math.sin(ang), o[1] + x * Math.sin(ang) + y * Math.cos(ang), p[2]]; }
-function rotX(p, ang, o) { const y = p[1] - o[1], z = p[2] - o[2];
-  return [p[0], o[1] + y * Math.cos(ang) - z * Math.sin(ang), o[2] + y * Math.sin(ang) + z * Math.cos(ang)]; }
+// --- 2D angle-motion panel: a protractor dial per device + rolling angle graph ---
+let histM=[],histP=[]; const HLEN=260;
+function drawDial(cx,cy,R,angDeg,ampDeg,label,color){
+  const a=angDeg*Math.PI/180, amp=Math.max(ampDeg,8)*Math.PI/180, piv=[cx,cy+R*0.5];
+  ctx.strokeStyle='rgba(0,0,0,0.16)'; ctx.lineWidth=1.5; ctx.beginPath();
+  for(let i=0;i<=24;i++){const t=-amp+2*amp*i/24,x=piv[0]+R*Math.sin(t),y=piv[1]-R*Math.cos(t); i?ctx.lineTo(x,y):ctx.moveTo(x,y);} ctx.stroke();
+  ctx.strokeStyle='rgba(0,0,0,0.22)'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(piv[0],piv[1]); ctx.lineTo(piv[0],piv[1]-R); ctx.stroke();
+  ctx.strokeStyle=color; ctx.lineWidth=2.6; ctx.beginPath(); ctx.moveTo(piv[0],piv[1]); ctx.lineTo(piv[0]+R*Math.sin(a),piv[1]-R*Math.cos(a)); ctx.stroke();
+  ctx.fillStyle=color; ctx.beginPath(); ctx.arc(piv[0],piv[1],3,0,TAU); ctx.fill();
+  ctx.fillStyle='#3a3f47'; ctx.textAlign='center'; ctx.font='10px ui-monospace,Menlo,monospace'; ctx.fillText(label,cx,cy-R*0.55-2);
+  ctx.fillStyle=color; ctx.font='11px ui-monospace,Menlo,monospace'; ctx.fillText(angDeg.toFixed(0)+'°',cx,piv[1]+15);
+}
+function drawGraph(x,y,w,h,ampDeg){
+  const mx=ampDeg*1.2, zy=y+h/2;
+  ctx.strokeStyle='rgba(0,0,0,0.15)'; ctx.lineWidth=1; ctx.strokeRect(x,y,w,h);
+  ctx.strokeStyle='rgba(0,0,0,0.1)'; ctx.beginPath(); ctx.moveTo(x,zy); ctx.lineTo(x+w,zy); ctx.stroke();
+  const plot=(hist,color)=>{ if(hist.length<2)return; ctx.strokeStyle=color; ctx.lineWidth=1.8; ctx.beginPath();
+    for(let i=0;i<hist.length;i++){const px=x+w*i/(HLEN-1), py=zy-(hist[i]/mx)*(h/2); i?ctx.lineTo(px,py):ctx.moveTo(px,py);} ctx.stroke(); };
+  plot(histM,'#cd3a40'); plot(histP,'#2470c8');
+  const hx=x+w*(Math.max(histM.length,1)-1)/(HLEN-1);
+  ctx.strokeStyle='rgba(0,0,0,0.2)'; ctx.beginPath(); ctx.moveTo(hx,y); ctx.lineTo(hx,y+h); ctx.stroke();
+  ctx.fillStyle='#3a3f47'; ctx.textAlign='left'; ctx.font='10px ui-monospace,Menlo,monospace'; ctx.fillText('swing angle vs time  (90° apart)',x+4,y-6);
+}
+function drawOverlay(mDeg,pDeg){
+  const pw=540,ph=150, px=(W-pw)/2, py=H-ph-14;
+  ctx.fillStyle='rgba(252,252,253,0.93)'; ctx.strokeStyle='rgba(0,0,0,0.12)'; ctx.lineWidth=1;
+  rr(px,py,pw,ph,12); ctx.fill(); ctx.stroke();
+  drawDial(px+70, py+ph/2, 44, mDeg, AMP_DEG, 'Metronome (front)', '#cd3a40');
+  drawDial(px+175,py+ph/2, 44, pDeg, AMP_DEG, 'Pendulum (side)',  '#2470c8');
+  drawGraph(px+248, py+26, 276, ph-48, AMP_DEG);
+}
 
-// ===========================================================================
-// State + UI
-// ===========================================================================
-const S = { rpm: 14, off: 90, running: true };
-let theta = 0, minClearance = Infinity;
-const el = id => document.getElementById(id);
-el('rpm').oninput = e => { S.rpm = +e.target.value; el('vrpm').textContent = S.rpm; };
-el('off').oninput = e => { S.off = +e.target.value; el('voff').textContent = S.off; };
-el('run').onclick = e => { S.running = !S.running; e.target.textContent = S.running ? 'Pause' : 'Run'; };
-el('resetmin').onclick = () => { minClearance = Infinity; };
-el('resetcam').onclick = () => { cam.yaw = 0.7; cam.pitch = 0.32; cam.scale = 56; };
-
-let dragging = false, lx = 0, ly = 0;
-canvas.onpointerdown = e => { dragging = true; lx = e.clientX; ly = e.clientY; canvas.classList.add('drag'); };
-addEventListener('pointerup', () => { dragging = false; canvas.classList.remove('drag'); });
-addEventListener('pointermove', e => {
-  if (!dragging) return;
-  cam.yaw += (e.clientX - lx) * 0.008; cam.pitch += (e.clientY - ly) * 0.008;
-  cam.pitch = Math.max(-0.2, Math.min(1.3, cam.pitch)); lx = e.clientX; ly = e.clientY;
-});
-canvas.onwheel = e => { e.preventDefault(); cam.scale *= e.deltaY < 0 ? 1.08 : 0.926;
-  cam.scale = Math.max(18, Math.min(160, cam.scale)); };
-
-// ===========================================================================
-// Main loop
-// ===========================================================================
-let last = performance.now();
-function frame(now) {
-  const dt = Math.min((now - last) / 1000, 0.05); last = now;
-  if (S.running) theta += (S.rpm / 60) * Math.PI * 2 * dt;
-  const off = S.off * Math.PI / 180;
-  queue = [];
-
-  // ---- METRONOME four-bar (plane z=0): local (lx,ly) -> world (lx, 0.55+ly, 0)
-  const m = solveFourBar(theta);
-  const mPivot = [0, M_PIVOT_Y, 0];
-  const dM = m.phi - PHI_MEAN;
-  const mBob = rotZ([0, M_PIVOT_Y + M_ARM, 0], dM, mPivot);
-  const mPin = [m.px, M_PIVOT_Y + m.py, 0];
-  const mTip = [m.qx, M_PIVOT_Y + m.qy, 0];
-
-  // ---- PENDULUM four-bar (plane x=0): local (lx,ly) -> world (0, 8+ly, lx)
-  const p = solveFourBar(theta + off);
-  const pPivot = [0, P_PIVOT_Y, 0];
-  const dP = -(p.phi - PHI_MEAN);
-  const pBob = rotX([0, P_PIVOT_Y - P_ARM, 0], dP, pPivot);
-  const pPin = [0, P_PIVOT_Y + p.py, p.px];
-  const pTip = [0, P_PIVOT_Y + p.qy, p.qx];
-
-  // ---- build draw queue (back to front handled by painter sort) ----
-  // drive train
-  pushBar([POLE_X, 0.1, POLE_Z], [POLE_X, CEILING_Y + 0.1, POLE_Z], 0.26, '#9aa6b4');   // pole
-  pushBar(metO2, metBevel, 0.16, '#8893a3');                                            // low crankshaft
-  pushBar(penO2, penBevel, 0.16, '#8893a3');                                            // high crankshaft
-  pushDisc(metBevel, 0.32, '#394150'); pushDisc(penBevel, 0.32, '#394150');             // bevel housings
-  pushDisc(metO2, FB.r2 + 0.12, '#2f3645'); pushDisc(penO2, FB.r2 + 0.12, '#2f3645');   // crank wheels
-  // motor + belt
-  pushDisc([3.8, 0.5, POLE_Z], 0.5, '#5a4a20'); pushDisc([POLE_X, 0.5, POLE_Z], 0.6, '#5a4a20');
-  pushBar([4.4, 0.55, POLE_Z], [4.4, 0.55, POLE_Z], 0.9, '#394150');
-  pushBar([3.8, 0.5, POLE_Z + 0.5], [POLE_X, 0.5, POLE_Z + 0.6], 0.05, '#2c2f36');
-  pushBar([3.8, 0.5, POLE_Z - 0.5], [POLE_X, 0.5, POLE_Z - 0.6], 0.05, '#2c2f36');
-
+// --- the whole mechanism, built into the queue using the current `view` ---
+function buildScene(){
+  const {m,p,dM,dP,theta,off,mBob,pBob,mPivot,pPivot,crash}=KM;
+  const UVY=uvFromAxis(Y_AXIS);
+  // drive train (wheel/gear/crankshaft markers all share the device's crank basis
+  // so the whole keyed shaft visibly turns ONE consistent direction)
+  tube([POLE_X,0.1,POLE_Z],[POLE_X,8.1,POLE_Z],0.13,C.steel,1.5,{n:20,seams:4,rings:8,marker:theta,uvm:UVY});
+  tube([POLE_X,M_PIVOT_Y,L_WHEEL+0.06],[POLE_X,M_PIVOT_Y,POLE_Z-0.42],0.07,C.steel,1.3,{n:14,seams:4,rings:3,marker:theta,uvm:UV_MET});
+  gearW([POLE_X,M_PIVOT_Y,POLE_Z],UVY,0.32,C.dim,theta);
+  gearW([POLE_X,M_PIVOT_Y,POLE_Z-0.36],UV_MET,0.30,C.dim,theta);
+  tube([L_WHEEL+0.06,P_PIVOT_Y,POLE_Z],[POLE_X-0.42,P_PIVOT_Y,POLE_Z],0.07,C.steel,1.3,{n:14,seams:4,rings:3,marker:theta+off,uvm:UV_PEN});
+  gearW([POLE_X,P_PIVOT_Y,POLE_Z],UVY,0.32,C.dim,theta+off);
+  gearW([POLE_X-0.36,P_PIVOT_Y,POLE_Z],UV_PEN,0.30,C.dim,theta+off);
+  wheelW(Wmet(FB.g,0,L_WHEEL),UV_MET,FB.r2+0.16,C.steel,theta);
+  wheelW(Wpen(FB.g,0,L_WHEEL),UV_PEN,FB.r2+0.16,C.steel,theta+off);
+  tube([3.95,0.55,POLE_Z],[4.75,0.55,POLE_Z],0.4,C.dim,1.3,{n:14,seams:4,rings:2});
+  wheelW([3.7,0.5,POLE_Z],UVY,0.5,C.dim,-theta*1.2);
+  wheelW([POLE_X,0.5,POLE_Z],UVY,0.6,C.dim,theta);
+  link([3.7,0.5,POLE_Z+0.5],[POLE_X,0.5,POLE_Z+0.6],C.dim,2);
+  link([3.7,0.5,POLE_Z-0.5],[POLE_X,0.5,POLE_Z-0.6],C.dim,2);
+  // D3 belt travel beads: top run carries them one way, bottom run the other (like a real belt)
+  for(let k=0;k<4;k++){
+    let ph=((theta*0.2+k/4)%1+1)%1, bx, bz;
+    if(ph<0.5){ const f=ph/0.5;       bx=3.7+(POLE_X-3.7)*f; bz=POLE_Z+0.55; }
+    else      { const f=(ph-0.5)/0.5; bx=POLE_X+(3.7-POLE_X)*f; bz=POLE_Z-0.55; }
+    dot3([bx,0.5,bz],0.07,C.orange);
+  }
   // metronome linkage
-  pushBar(metO2, mPin, 0.06, '#d9a441');                  // crank spoke
-  pushBar(mPin, mTip, 0.09, '#aab4c2');                   // CONNECTING ROD (constant length)
-  pushBar(mPivot, mTip, 0.1, '#4a5364');                  // bellcrank / rocker
-  pushBar(mPivot, mBob, 0.12, '#9aa6b4');                 // metronome arm
-  pushRing(mPin, '#e6c463'); pushRing(mTip, '#e6c463');   // big-end + small-end bearings
-
+  link(Wmet(FB.g,0,L_WHEEL),Wmet(m.px,m.py,L_WHEEL),C.gold,2);
+  link(Wmet(m.px,m.py,L_WHEEL),Wmet(m.px,m.py,L_ROD),C.steel,2.2);
+  link(Wmet(m.px,m.py,L_ROD),Wmet(m.qx,m.qy,L_ROD),C.rod,2.6);
+  link(Wmet(m.qx,m.qy,L_ROD),Wmet(m.qx,m.qy,L_BELL),C.steel,2.2);
+  link(mPivot,Wmet(m.qx,m.qy,L_BELL),C.line,2.2);
+  link(mPivot,mBob,C.line,2.6);
+  ringW(Wmet(m.px,m.py,L_ROD),Z_AXIS,0.17,C.gold);
+  ringW(Wmet(m.qx,m.qy,L_ROD),Z_AXIS,0.13,C.gold);
+  ringW(mPivot,Z_AXIS,0.18,C.steel);
+  // counterweight: a rigid extension of the SAME arm, below the pivot, opposite the bob.
+  // It swings with the arm (shares angle dM) and balances it about the pivot.
+  const cwEnd=rotZ([0,M_PIVOT_Y-0.85,0],dM,[0,M_PIVOT_Y,0]);
+  link(mPivot,cwEnd,C.line,2.6);
+  sphereW(cwEnd,0.2,C.dim);
   // pendulum linkage
-  pushBar(penO2, pPin, 0.06, '#d9a441');
-  pushBar(pPin, pTip, 0.09, '#aab4c2');
-  pushBar(pPivot, pTip, 0.1, '#4a5364');
-  pushBar(pPivot, pBob, 0.12, '#9aa6b4');
-  pushRing(pPin, '#e6c463'); pushRing(pTip, '#e6c463');
+  link(Wpen(FB.g,0,L_WHEEL),Wpen(p.px,p.py,L_WHEEL),C.gold,2);
+  link(Wpen(p.px,p.py,L_WHEEL),Wpen(p.px,p.py,L_ROD),C.steel,2.2);
+  link(Wpen(p.px,p.py,L_ROD),Wpen(p.qx,p.qy,L_ROD),C.rod,2.6);
+  link(Wpen(p.qx,p.qy,L_ROD),Wpen(p.qx,p.qy,L_BELL),C.steel,2.2);
+  link(pPivot,Wpen(p.qx,p.qy,L_BELL),C.line,2.2);
+  link(pPivot,pBob,C.line,2.6);
+  ringW(Wpen(p.px,p.py,L_ROD),X_AXIS,0.17,C.gold);
+  ringW(Wpen(p.qx,p.qy,L_ROD),X_AXIS,0.13,C.gold);
+  ringW(pPivot,X_AXIS,0.18,C.steel);
+  ringW([0,0.2,0],Y_AXIS,0.55,C.dim); ringW([0,7.9,0],Y_AXIS,0.5,C.dim);
+  sphereW(mBob,BOB_R,C.red,crash);
+  sphereW(pBob,BOB_R,C.blue,crash);
+}
 
-  // bobs (collision check)
-  const clr = Math.hypot(mBob[0] - pBob[0], mBob[1] - pBob[1], mBob[2] - pBob[2]);
-  minClearance = Math.min(minClearance, clr);
-  const crash = clr < BOB_R * 2;
-  pushBob(mBob, BOB_R, crash ? '#ff3b3f' : '#ff5d62');
-  pushBob(pBob, BOB_R, crash ? '#ff3b3f' : '#4fb6ff');
+function wrapText(t,maxw){
+  const words=t.split(' '),lines=[]; let cur='';
+  for(const w of words){const test=cur?cur+' '+w:w; if(ctx.measureText(test).width>maxw&&cur){lines.push(cur);cur=w;}else cur=test;}
+  if(cur)lines.push(cur); return lines;
+}
+// hover panel: long name + zoomed closeup of the part + what connects at each end
+function drawCloseup(L){
+  const pw=300, px=W-pw-14, vw=pw-24, vh=148;
+  ctx.font='11px ui-monospace,Menlo,monospace';
+  const aL=wrapText('End A — '+L.ends[0],vw), bL=wrapText('End B — '+L.ends[1],vw);
+  const ph=30+vh+14+(aL.length+bL.length)*15+12;
+  const py=Math.max(14,(H-ph)/2), vx=px+12, vy=py+30;   // vertically centred, clear of the top-right GUI
+  ctx.fillStyle='rgba(252,252,253,0.97)'; ctx.strokeStyle='rgba(0,0,0,0.16)'; ctx.lineWidth=1;
+  rr(px,py,pw,ph,12); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='#1c1f24'; ctx.textAlign='left'; ctx.font='bold 12px ui-monospace,Menlo,monospace';
+  ctx.fillText(L.code+'  ·  '+L.t, px+12, py+18);
+  // zoomed viewport (re-render mechanism centred on this part)
+  ctx.save(); rr(vx,vy,vw,vh,8); ctx.clip();
+  ctx.fillStyle='#fff'; ctx.fillRect(vx,vy,vw,vh);
+  const saved=view;
+  view={yaw:cam.yaw,pitch:cam.pitch,scale:L.z||90,cx:vx+vw/2,cy:vy+vh/2,c3:L.a};
+  queue=[]; buildScene(); queue.sort((a,b)=>a.depth-b.depth); for(const it of queue) it.fn();
+  const fp=project(L.a); ctx.strokeStyle=L.c; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(fp.x,fp.y,18,0,TAU); ctx.stroke();
+  view=saved; ctx.restore();
+  ctx.strokeStyle='rgba(0,0,0,0.12)'; rr(vx,vy,vw,vh,8); ctx.stroke();
+  // end-connection text
+  let ty=vy+vh+16; ctx.font='11px ui-monospace,Menlo,monospace'; ctx.textAlign='left';
+  ctx.fillStyle='#9a7415'; for(const ln of aL){ctx.fillText(ln,px+12,ty); ty+=15;}
+  ctx.fillStyle='#1f5aa0'; for(const ln of bL){ctx.fillText(ln,px+12,ty); ty+=15;}
+}
 
-  // ---- render ----
-  ctx.clearRect(0, 0, W, H);
-  drawGrid();
-  queue.sort((a, b) => a.depth - b.depth);
-  for (const item of queue) item.fn();
+// === state + UI ============================================================
+const S={rpm:14,off:90,running:true,labels:true,graph:true}; let theta=0,minClearance=Infinity;
+const el=id=>document.getElementById(id);
+el('rpm').oninput=e=>{S.rpm=+e.target.value;el('vrpm').textContent=S.rpm;};
+el('off').oninput=e=>{S.off=+e.target.value;el('voff').textContent=S.off;};
+el('run').onclick=e=>{S.running=!S.running;e.target.textContent=S.running?'Pause':'Run';};
+el('resetmin').onclick=()=>{minClearance=Infinity;};
+el('resetcam').onclick=()=>{cam.yaw=0.72;cam.pitch=0.34;cam.scale=56;};
+el('labels').onclick=e=>{S.labels=!S.labels;e.target.textContent='Labels: '+(S.labels?'on':'off');};
+el('graph').onclick=e=>{S.graph=!S.graph;e.target.textContent='Graph: '+(S.graph?'on':'off');};
+let dragging=false,lx=0,ly=0;
+canvas.onpointerdown=e=>{dragging=true;lx=e.clientX;ly=e.clientY;canvas.classList.add('drag');};
+addEventListener('pointerup',()=>{dragging=false;canvas.classList.remove('drag');});
+addEventListener('pointermove',e=>{mx=e.clientX;my=e.clientY; if(!dragging)return;cam.yaw+=(e.clientX-lx)*0.008;cam.pitch+=(e.clientY-ly)*0.008;
+  cam.pitch=Math.max(-0.2,Math.min(1.3,cam.pitch));lx=e.clientX;ly=e.clientY;});
+canvas.onwheel=e=>{e.preventDefault();cam.scale*=e.deltaY<0?1.08:0.926;cam.scale=Math.max(18,Math.min(160,cam.scale));};
 
-  // ---- HUD ----
-  el('angM').textContent = (dM * 180 / Math.PI).toFixed(0) + '°';
-  el('angP').textContent = (-dP * 180 / Math.PI).toFixed(0) + '°';
-  el('rodlen').textContent = Math.hypot(mPin[0] - mTip[0], mPin[1] - mTip[1], mPin[2] - mTip[2]).toFixed(3) + ' m';
-  el('clr').textContent = clr.toFixed(2) + ' m';
-  el('minclr').textContent = (minClearance === Infinity ? '—' : minClearance.toFixed(2) + ' m');
-  const st = el('status'); st.textContent = crash ? 'COLLISION' : 'SAFE'; st.className = crash ? 'crash' : 'safe';
+// === main loop =============================================================
+let lastT=performance.now();
+function frame(now){
+  const dt=Math.min((now-lastT)/1000,0.05); lastT=now;
+  if(S.running) theta+=(S.rpm/60)*TAU*dt;
+  const off=S.off*Math.PI/180; queue=[];
+
+  // ---- solve both four-bars ----
+  const m=solveFourBar(theta), dM=m.phi-PHI_MEAN;
+  const p=solveFourBar(theta+off), dP=-(p.phi-PHI_MEAN);
+  const mAngDeg=dM*180/Math.PI, pAngDeg=(p.phi-PHI_MEAN)*180/Math.PI;
+  if(S.running){histM.push(mAngDeg);histP.push(pAngDeg);if(histM.length>HLEN)histM.shift();if(histP.length>HLEN)histP.shift();}
+
+  // ===== kinematics positions =====
+  const mPivot=Wmet(0,0,L_BELL), mBob=rotZ([0,M_PIVOT_Y+M_ARM,0],dM,[0,M_PIVOT_Y,0]);
+  const pPivot=Wpen(0,0,L_BELL), pBob=rotX([0,P_PIVOT_Y-P_ARM,0],dP,[0,P_PIVOT_Y,0]);
+  const clr=len(sub(mBob,pBob)); minClearance=Math.min(minClearance,clr); const crash=clr<BOB_R*2;
+  KM={m,p,dM,dP,theta,off,mBob,pBob,mPivot,pPivot,crash};
+
+  // ===== part labels: code, name, end-connections, anchor, screen-offset, colour, zoom =====
+  labels=[
+    {code:'D1',t:'Motor',a:[4.35,0.55,POLE_Z],o:[46,-40],c:'#5a6472',z:42,ends:['Mains power in (bolted to floor)','Output shaft -> motor pulley (D2)']},
+    {code:'D2',t:'Motor pulley',a:[3.7,0.5,POLE_Z],o:[-150,46],c:'#5a6472',z:120,ends:['Keyed to motor output shaft','Drive belt (D3) -> pole pulley (D4)']},
+    {code:'D3',t:'Drive belt',a:[(3.7+POLE_X)/2,0.5,POLE_Z+0.55],o:[20,50],c:'#5a6472',z:70,ends:['Motor pulley (D2)','Pole pulley (D4)']},
+    {code:'D4',t:'Pole pulley',a:[POLE_X,0.5,POLE_Z],o:[44,34],c:'#5a6472',z:120,ends:['Drive belt (D3)','Keyed to line-shaft (D5)']},
+    {code:'D5',t:'Line-shaft (pole)',a:[POLE_X,5.4,POLE_Z],o:[50,0],c:'#b08a2a',z:24,ends:['Bevel gears at each height (D6, D8)','Foot & top bearings - rotates only']},
+    {code:'D6',t:'Bevel gears (low)',a:[POLE_X,M_PIVOT_Y,POLE_Z-0.36],o:[48,-26],c:'#5a6472',z:130,ends:['Driven by line-shaft (D5)','Turns crankshaft (D7) through 90 deg']},
+    {code:'D7',t:'Crankshaft (low)',a:[POLE_X,M_PIVOT_Y,(L_WHEEL+POLE_Z)/2],o:[16,40],c:'#5a6472',z:80,ends:['Bevel gear (D6)','Crank wheel (M1)']},
+    {code:'D8',t:'Bevel gears (high)',a:[POLE_X,P_PIVOT_Y,POLE_Z-0.36],o:[48,26],c:'#5a6472',z:130,ends:['Line-shaft (D5)','Turns crankshaft (D9) through 90 deg']},
+    {code:'D9',t:'Crankshaft (high)',a:[(L_WHEEL+POLE_X)/2,P_PIVOT_Y,POLE_Z],o:[16,-38],c:'#5a6472',z:80,ends:['Bevel gear (D8)','Crank wheel (P1)']},
+    {code:'M1',t:'Crank wheel',a:Wmet(FB.g,0,L_WHEEL),o:[48,16],c:'#3a3f47',z:120,ends:['Keyed to crankshaft (D7) - full rotation','Crank throw (M2) fixed to its rim']},
+    {code:'M2',t:'Crank throw (eccentric)',a:Wmet(FB.g,0,L_WHEEL),tip:mid(Wmet(FB.g,0,L_WHEEL),Wmet(m.px,m.py,L_WHEEL)),o:[44,-18],c:'#b08a2a',z:150,ends:['Fixed off-centre on crank wheel (M1)','Big-end bearing (M3)']},
+    {code:'M3',t:'Big-end bearing',a:Wmet(FB.g,0,L_WHEEL),tip:Wmet(m.px,m.py,L_ROD),o:[42,-4],c:'#b08a2a',z:170,ends:['Rides free on crank throw (M2)','Big end of connecting rod (M4)']},
+    {code:'M4',t:'Connecting rod',a:Wmet(FB.g*0.5,0,L_ROD),tip:mid(Wmet(m.px,m.py,L_ROD),Wmet(m.qx,m.qy,L_ROD)),o:[6,-42],c:'#2c3038',z:80,ends:['Big-end bearing (M3) at crank','Small-end bearing (M5) at rocker']},
+    {code:'M5',t:'Small-end bearing',a:mPivot,tip:Wmet(m.qx,m.qy,L_ROD),o:[-160,-26],c:'#b08a2a',z:170,ends:['Small end of connecting rod (M4)','Pin into bellcrank (M6)']},
+    {code:'M6',t:'Bellcrank (rocker)',a:mPivot,tip:mid(mPivot,Wmet(m.qx,m.qy,L_BELL)),o:[-180,12],c:'#3a3f47',z:110,ends:['Small-end pin (M5)','Rigid to pivot (M7) & arm (M8)']},
+    {code:'M7',t:'Pivot bearing',a:mPivot,o:[-150,2],c:'#5a6472',z:150,ends:['Fixed to floor base','Carries bellcrank (M6) + arm (M8)']},
+    {code:'M8',t:'Metronome arm',a:[0,(M_PIVOT_Y+CROSS_Y)/2,0],tip:mid(mPivot,mBob),o:[-175,0],c:'#3a3f47',z:34,ends:['Pivot bearing (M7)','Metronome bob (M9)']},
+    {code:'M9',t:'Metronome bob',a:[0,CROSS_Y,0],tip:mBob,o:[30,-18],c:'#cd3a40',z:90,ends:['Top of metronome arm (M8)','Free end - sweeps left/right']},
+    {code:'M10',t:'Counterweight',a:[0,M_PIVOT_Y-0.85,0],tip:rotZ([0,M_PIVOT_Y-0.85,0],dM,[0,M_PIVOT_Y,0]),o:[-150,30],c:'#5a6472',z:95,ends:['Same arm, rigidly fixed below pivot (M7)','Swings opposite the bob; balances the lever so the motor turns smoothly']},
+    {code:'P1',t:'Crank wheel (pendulum)',a:Wpen(FB.g,0,L_WHEEL),o:[48,-14],c:'#3a3f47',z:120,ends:['Keyed to crankshaft (D9) - 90 deg from M1','Crank throw -> big-end -> rod (P2)']},
+    {code:'P2',t:'Connecting rod (pendulum)',a:Wpen(FB.g*0.5,0,L_ROD),tip:mid(Wpen(p.px,p.py,L_ROD),Wpen(p.qx,p.qy,L_ROD)),o:[34,-24],c:'#2c3038',z:80,ends:['Big-end bearing on crank (P1)','Small-end -> bellcrank -> arm (P3)']},
+    {code:'P3',t:'Pendulum arm',a:[0,(P_PIVOT_Y+CROSS_Y)/2,0],tip:mid(pPivot,pBob),o:[40,0],c:'#3a3f47',z:34,ends:['Ceiling pivot bearing','Pendulum bob (P4)']},
+    {code:'P4',t:'Pendulum bob',a:[0,CROSS_Y,0],tip:pBob,o:[34,18],c:'#2470c8',z:90,ends:['Bottom of pendulum arm (P3)','Free end - sweeps fwd/back']},
+  ];
+
+  // ===== main render =====
+  view.yaw=cam.yaw; view.pitch=cam.pitch; view.scale=cam.scale; view.cx=W/2; view.cy=H/2; view.c3=CENTER;
+  queue=[]; buildScene();
+  ctx.clearRect(0,0,W,H); grid();
+  queue.sort((a,b)=>a.depth-b.depth); for(const it of queue) it.fn();
+  hovered=null;
+  if(S.labels) drawLabels();
+  if(S.graph)  drawOverlay(mAngDeg,pAngDeg);
+  if(S.labels && hovered) drawCloseup(hovered);
+
+  // HUD
+  el('angM').textContent=(dM*180/Math.PI).toFixed(0)+'°';
+  el('angP').textContent=(-dP*180/Math.PI).toFixed(0)+'°';
+  el('rodlen').textContent=len(sub(Wmet(m.px,m.py,L_ROD),Wmet(m.qx,m.qy,L_ROD))).toFixed(3)+' m';
+  el('clr').textContent=clr.toFixed(2)+' m';
+  el('minclr').textContent=(minClearance===Infinity?'—':minClearance.toFixed(2)+' m');
+  const st=el('status'); st.textContent=crash?'COLLISION':'SAFE'; st.className=crash?'crash':'safe';
 
   requestAnimationFrame(frame);
 }
