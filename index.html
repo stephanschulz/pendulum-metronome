@@ -24,6 +24,10 @@
     line-height:1;cursor:pointer;box-shadow:0 2px 12px rgba(0,0,0,0.08);}
   #toggle:hover{background:#eef0f3;}
   body.collapsed #hud, body.collapsed #ctl{display:none;}
+  #graphtoggle{position:fixed;bottom:14px;left:14px;z-index:20;padding:7px 11px;border-radius:9px;
+    background:rgba(252,252,253,0.92);border:1px solid rgba(0,0,0,0.15);color:#33373d;font-size:11px;
+    font-family:inherit;cursor:pointer;box-shadow:0 2px 12px rgba(0,0,0,0.08);}
+  #graphtoggle:hover{background:#eef0f3;}
   #ctl label{display:block;margin:8px 0 2px;color:#5a5f67;}
   #ctl input[type=range]{width:100%;}
   #ctl .btns{display:flex;gap:6px;margin-top:10px;}
@@ -36,6 +40,7 @@
 <body>
 <canvas id="c"></canvas>
 <button id="toggle" aria-label="Toggle info & controls">i</button>
+<button id="graphtoggle" aria-label="Toggle angle graph">Graph</button>
 
 <div id="hud" class="panel">
   <h1>One motor → two crossing motions, no tangle</h1>
@@ -188,6 +193,15 @@ function sphereW(center,r,col,solid){               // wire bob; fills solid on 
   poly(circle3(center,X_AXIS,r,22),col,1,true);
   poly(circle3(center,Y_AXIS,r,22),col,1,true);
   poly(circle3(center,Z_AXIS,r,22),col,1,true);
+}
+function drawTrail(trail,col){            // fading line: old points faint, recent points solid
+  ctx.lineCap='round';
+  for(let i=1;i<trail.length;i++){
+    const a=project(trail[i-1]), b=project(trail[i]), t=i/trail.length;
+    ctx.strokeStyle=`rgba(${col[0]},${col[1]},${col[2]},${(t*0.75).toFixed(3)})`;
+    ctx.lineWidth=0.6+t*2.2;
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+  }
 }
 function grid(){ctx.strokeStyle='rgba(120,130,140,0.22)';ctx.lineWidth=1;const G=7;
   for(let i=-G;i<=G;i++){let a=project([i,0,-G]),b=project([i,0,G]);ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
@@ -348,20 +362,24 @@ function drawCloseup(L){
 // === state + UI ============================================================
 const S={rpm:14,off:90,ratio:0.8,running:true,labels:true,graph:true}; let theta=0,minClearance=Infinity;
 let penFolded=false, foldAmt=0, penFoldSign=1, prevSwingP=0;   // fold latch + which side it folds to
+const mTrail=[], pTrail=[]; const TRAIL=72;                    // fading motion trails behind each bob
 const el=id=>document.getElementById(id);
 el('rpm').oninput=e=>{S.rpm=+e.target.value;el('vrpm').textContent=S.rpm;};
 el('off').oninput=e=>{S.off=+e.target.value;el('voff').textContent=S.off;};
 el('ratio').oninput=e=>{S.ratio=+e.target.value;el('vratio').textContent=S.ratio.toFixed(2);};
 // collapse info text + GUI behind a little button (collapsed by default on phones)
-const tgBtn=el('toggle');
+const tgBtn=el('toggle'), gtBtn=el('graphtoggle');
 function setCollapsed(c){document.body.classList.toggle('collapsed',c); tgBtn.textContent=c?'☰':'✕';}
+function setGraph(v){S.graph=v; el('graph').textContent='Graph: '+(v?'on':'off'); gtBtn.textContent=v?'Graph ✕':'Graph';}
 tgBtn.onclick=()=>setCollapsed(!document.body.classList.contains('collapsed'));
-setCollapsed(matchMedia('(max-width: 768px)').matches || ('ontouchstart' in window));
+gtBtn.onclick=()=>setGraph(!S.graph);
+const isMobile=matchMedia('(max-width: 768px)').matches || ('ontouchstart' in window);
+setCollapsed(isMobile); setGraph(!isMobile);   // hide info, GUI and graph by default on phones
 el('run').onclick=e=>{S.running=!S.running;e.target.textContent=S.running?'Pause':'Run';};
 el('resetmin').onclick=()=>{minClearance=Infinity;};
 el('resetcam').onclick=()=>{cam.yaw=0.72;cam.pitch=0.34;cam.scale=56;};
 el('labels').onclick=e=>{S.labels=!S.labels;e.target.textContent='Labels: '+(S.labels?'on':'off');};
-el('graph').onclick=e=>{S.graph=!S.graph;e.target.textContent='Graph: '+(S.graph?'on':'off');};
+el('graph').onclick=()=>setGraph(!S.graph);
 let dragging=false,lx=0,ly=0;
 canvas.onpointerdown=e=>{dragging=true;lx=e.clientX;ly=e.clientY;canvas.classList.add('drag');};
 addEventListener('pointerup',()=>{dragging=false;canvas.classList.remove('drag');});
@@ -385,6 +403,8 @@ function frame(now){
   // ===== kinematics positions =====
   const mPivot=Wmet(0,0,L_BELL), mBob=rotZ([0,M_PIVOT_Y+M_ARM,0],dM,[0,M_PIVOT_Y,0]);
   const pPivot=Wpen(0,0,L_BELL), pBob=rotX([0,P_PIVOT_Y-P_ARM,0],dP,[0,P_PIVOT_Y,0]);
+  if(S.running){ mTrail.push(mBob); pTrail.push(pBob);
+    if(mTrail.length>TRAIL)mTrail.shift(); if(pTrail.length>TRAIL)pTrail.shift(); }
   const clr=len(sub(mBob,pBob)); minClearance=Math.min(minClearance,clr); const crash=clr<BOB_R*2;
   // fold latch: a detected hit folds the pendulum tip; it stays folded until the
   // pendulum reaches either swing extreme, then releases.
@@ -427,6 +447,7 @@ function frame(now){
   view.yaw=cam.yaw; view.pitch=cam.pitch; view.scale=cam.scale; view.cx=W/2; view.cy=H/2; view.c3=CENTER;
   queue=[]; buildScene();
   ctx.clearRect(0,0,W,H); grid();
+  drawTrail(mTrail,C.red); drawTrail(pTrail,C.blue);
   queue.sort((a,b)=>a.depth-b.depth); for(const it of queue) it.fn();
   hovered=null;
   if(S.labels) drawLabels();
