@@ -18,7 +18,12 @@
   b.m{color:#cc4146;} b.p{color:#2470c8;} b.y{color:#b8860b;} b.o{color:#d2691e;}
   .sep{height:1px;background:rgba(0,0,0,0.1);margin:9px 0;}
   .hint{margin-top:8px;color:#8a8f97;font-style:italic;}
-  #ctl{top:14px;right:14px;width:228px;padding:12px 14px;}
+  #ctl{top:62px;right:14px;width:228px;padding:12px 14px;}
+  #toggle{position:fixed;top:14px;right:14px;width:38px;height:38px;z-index:20;border-radius:9px;
+    background:rgba(252,252,253,0.92);border:1px solid rgba(0,0,0,0.15);color:#33373d;font-size:17px;
+    line-height:1;cursor:pointer;box-shadow:0 2px 12px rgba(0,0,0,0.08);}
+  #toggle:hover{background:#eef0f3;}
+  body.collapsed #hud, body.collapsed #ctl{display:none;}
   #ctl label{display:block;margin:8px 0 2px;color:#5a5f67;}
   #ctl input[type=range]{width:100%;}
   #ctl .btns{display:flex;gap:6px;margin-top:10px;}
@@ -30,6 +35,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
+<button id="toggle" aria-label="Toggle info & controls">i</button>
 
 <div id="hud" class="panel">
   <h1>One motor → two crossing motions, no tangle</h1>
@@ -346,6 +352,11 @@ const el=id=>document.getElementById(id);
 el('rpm').oninput=e=>{S.rpm=+e.target.value;el('vrpm').textContent=S.rpm;};
 el('off').oninput=e=>{S.off=+e.target.value;el('voff').textContent=S.off;};
 el('ratio').oninput=e=>{S.ratio=+e.target.value;el('vratio').textContent=S.ratio.toFixed(2);};
+// collapse info text + GUI behind a little button (collapsed by default on phones)
+const tgBtn=el('toggle');
+function setCollapsed(c){document.body.classList.toggle('collapsed',c); tgBtn.textContent=c?'☰':'✕';}
+tgBtn.onclick=()=>setCollapsed(!document.body.classList.contains('collapsed'));
+setCollapsed(matchMedia('(max-width: 768px)').matches || ('ontouchstart' in window));
 el('run').onclick=e=>{S.running=!S.running;e.target.textContent=S.running?'Pause':'Run';};
 el('resetmin').onclick=()=>{minClearance=Infinity;};
 el('resetcam').onclick=()=>{cam.yaw=0.72;cam.pitch=0.34;cam.scale=56;};
