@@ -452,7 +452,7 @@ function frame(now){
   hovered=null;
   if(S.labels) drawLabels();
   if(S.graph)  drawOverlay(mAngDeg,pAngDeg);
-  if(S.labels && hovered) drawCloseup(hovered);
+  if(S.labels && hovered && !isMobile) drawCloseup(hovered);   // no hover closeup on touch devices
 
   // HUD
   el('angM').textContent=(dM*180/Math.PI).toFixed(0)+'°';
