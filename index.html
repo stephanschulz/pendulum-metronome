@@ -52,8 +52,8 @@
   <input type="range" id="rpm" min="0" max="60" step="1" value="14">
   <label>Crank phase offset° <span class="val" id="voff">90</span></label>
   <input type="range" id="off" min="0" max="180" step="1" value="90">
-  <label>Pendulum speed ratio <span class="val" id="vratio">1.00</span></label>
-  <input type="range" id="ratio" min="0.5" max="2" step="0.01" value="1">
+  <label>Pendulum speed ratio <span class="val" id="vratio">0.80</span></label>
+  <input type="range" id="ratio" min="0.5" max="2" step="0.01" value="0.8">
   <div class="btns">
     <button id="run">Pause</button>
     <button id="resetmin">Reset min</button>
@@ -340,8 +340,8 @@ function drawCloseup(L){
 }
 
 // === state + UI ============================================================
-const S={rpm:14,off:90,ratio:1,running:true,labels:true,graph:true}; let theta=0,minClearance=Infinity;
-let penFolded=false, foldAmt=0;   // fold latch: set on a hit, released at a swing extreme
+const S={rpm:14,off:90,ratio:0.8,running:true,labels:true,graph:true}; let theta=0,minClearance=Infinity;
+let penFolded=false, foldAmt=0, penFoldSign=1, prevSwingP=0;   // fold latch + which side it folds to
 const el=id=>document.getElementById(id);
 el('rpm').oninput=e=>{S.rpm=+e.target.value;el('vrpm').textContent=S.rpm;};
 el('off').oninput=e=>{S.off=+e.target.value;el('voff').textContent=S.off;};
@@ -377,11 +377,12 @@ function frame(now){
   const clr=len(sub(mBob,pBob)); minClearance=Math.min(minClearance,clr); const crash=clr<BOB_R*2;
   // fold latch: a detected hit folds the pendulum tip; it stays folded until the
   // pendulum reaches either swing extreme, then releases.
-  const swingP=p.phi-PHI_MEAN;
-  if(crash) penFolded=true;
+  const swingP=p.phi-PHI_MEAN, swingVel=swingP-prevSwingP; prevSwingP=swingP;
+  if(crash){ if(!penFolded) penFoldSign = swingVel>=0?1:-1;  // fold toward the way it's swinging
+             penFolded=true; }
   else if(Math.abs(swingP) > AMP_RAD*0.9) penFolded=false;
   foldAmt += ((penFolded?1:0)-foldAmt)*0.25;            // ease toward folded / straight
-  const foldAngle=foldAmt*2.6;                          // ~150 deg when fully folded up
+  const foldAngle=foldAmt*2.6*penFoldSign;              // ~150 deg, up to the swing side
   KM={m,p,dM,dP,theta,off,ratio:S.ratio,mBob,pBob,mPivot,pPivot,crash,foldAngle};
 
   // ===== part labels: code, name, end-connections, anchor, screen-offset, colour, zoom =====
